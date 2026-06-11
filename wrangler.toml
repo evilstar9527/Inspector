@@ -2,10 +2,10 @@ name = "claude-inspector"
 main = "src/index.js"
 compatibility_date = "2024-11-01"
 
-# 自定义域名。要求 pdjjq.org 这个 zone 已托管在同一个 Cloudflare 账号下；
+# 自定义域名。要求 evilstar.org 这个 zone 已托管在同一个 Cloudflare 账号下；
 # custom_domain = true 会自动创建 DNS 记录并签发证书，无需手动配 DNS。
 routes = [
-  { pattern = "inspector.pdjjq.org", custom_domain = true }
+  { pattern = "inspector.evilstar.org", custom_domain = true }
 ]
 
 # 纯静态资源前端（离线解析，不需要密钥 / 不发网络请求）。

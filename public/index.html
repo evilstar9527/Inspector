@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Claude Inspector · 请求与 SSE 解剖台</title>
+<title>Inspector · Claude / Codex 请求解剖台</title>
 <!-- favicon：分层方块（system/tools/messages 三色），内联 data-URI 确保零依赖 -->
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23161310'/%3E%3Crect x='14' y='17' width='22' height='8' rx='4' fill='%2388c98b'/%3E%3Crect x='14' y='28' width='30' height='8' rx='4' fill='%238fb0dd'/%3E%3Crect x='14' y='39' width='36' height='8' rx='4' fill='%23e57a4c'/%3E%3C/svg%3E">
 <link rel="alternate icon" href="/favicon.svg" type="image/svg+xml">
@@ -40,6 +40,11 @@ header{display:flex;align-items:center;gap:18px;padding:10px 20px;
   flex-shrink:0;animation:slideDown .45s cubic-bezier(.2,.9,.3,1) both}
 @keyframes slideDown{from{transform:translateY(-100%);opacity:0}to{transform:none;opacity:1}}
 header .brand{display:flex;align-items:center;gap:10px}
+/* claude / codex 模式切换：点品牌区切换 */
+.brand.modesw{cursor:pointer;padding:3px 10px 3px 6px;border-radius:6px;border:1px solid transparent;
+  transition:.18s;opacity:.42;user-select:none}
+.brand.modesw:hover{opacity:.85}
+.brand.modesw.active{opacity:1;border-color:var(--border2);background:linear-gradient(180deg,var(--panel2),transparent)}
 header .brand .mark{width:28px;height:28px;flex-shrink:0;border-radius:7px;display:block;
   filter:drop-shadow(0 0 8px var(--accent-glow))}
 header .logo{font-family:var(--disp);color:var(--accent);font-weight:700;font-size:16px;letter-spacing:.5px}
@@ -189,6 +194,12 @@ pre.raw .ev{color:var(--accent2)}pre.raw .da{color:var(--green)}
 .et-message_stop{border-left:3px solid var(--accent)}
 .et-error{border-left:3px solid var(--red)}
 .et-ping{border-left:3px solid var(--border);opacity:.5}
+/* Codex (Responses API) 事件按类别上色 */
+.et-cxstart{border-left:3px solid var(--accent2)}
+.et-cxadd{border-left:3px solid var(--green)}
+.et-cxdelta{border-left:3px solid var(--border2)}
+.et-cxdone{border-left:3px solid var(--accent)}
+.et-cxerr{border-left:3px solid var(--red)}
 
 .usage{display:grid;grid-template-columns:repeat(auto-fit,minmax(118px,1fr));gap:8px;margin:4px 0 14px}
 .ucard{background:linear-gradient(180deg,var(--panel2),var(--panel));border:1px solid var(--border2);
@@ -287,7 +298,7 @@ details.turn>summary .tmeta{font-family:var(--mono);font-size:10.5px;color:var(-
 <body>
 
 <header>
-  <span class="brand">
+  <span class="brand modesw active" data-mode="claude">
     <svg class="mark" viewBox="0 0 64 64" aria-hidden="true">
       <rect width="64" height="64" rx="14" fill="#161310"/>
       <rect x="0.75" y="0.75" width="62.5" height="62.5" rx="13.25" fill="none" stroke="#453a26" stroke-width="1.5"/>
@@ -297,9 +308,23 @@ details.turn>summary .tmeta{font-family:var(--mono);font-size:10.5px;color:var(-
     </svg>
     <span class="logo">claude·inspector <small>/ 离线解剖台</small></span>
   </span>
-  <div class="maintabs">
+  <span class="brand modesw" data-mode="codex">
+    <svg class="mark" viewBox="0 0 64 64" aria-hidden="true">
+      <rect width="64" height="64" rx="14" fill="#161310"/>
+      <rect x="0.75" y="0.75" width="62.5" height="62.5" rx="13.25" fill="none" stroke="#453a26" stroke-width="1.5"/>
+      <rect x="14" y="17" width="36" height="8" rx="4" fill="#8fb0dd"/>
+      <rect x="14" y="28" width="22" height="8" rx="4" fill="#c49ee2"/>
+      <rect x="14" y="39" width="30" height="8" rx="4" fill="#88c98b"/>
+    </svg>
+    <span class="logo" style="color:var(--accent2)">codex·inspector <small>/ Responses API</small></span>
+  </span>
+  <div class="maintabs" id="tabsClaude">
     <button data-page="req" class="active">① 解析请求 Body</button>
     <button data-page="sse">② 解析 SSE 输出</button>
+  </div>
+  <div class="maintabs" id="tabsCodex" style="display:none">
+    <button data-page="codex" class="active">① 解析请求 Body</button>
+    <button data-page="codexsse">② 解析 SSE 输出</button>
   </div>
   <span class="spacer"></span>
   <span class="hint">数据纯本地解析 · 不上传任何内容</span>
@@ -361,6 +386,66 @@ data: {...}
       <div class="tabpane active" id="tab-recon" style="padding:14px"><div class="empty">解析后展示：把 <code>*_delta</code> 拼回完整 message（文本 / thinking / tool_use 入参），<br>以及 <code>usage</code>（含 cache 读写）与 <code>stop_reason</code>。</div></div>
       <div class="tabpane" id="tab-events" style="padding:14px"></div>
       <div class="tabpane" id="tab-raw" style="padding:14px"><pre class="raw" id="rawOut"></pre></div>
+    </div>
+  </section>
+</div>
+
+<!-- ================= 功能三：Codex (Responses API) 请求体 ================= -->
+<div class="page" id="page-codex">
+  <section class="col">
+    <div class="col-head"><h2>请求体 (粘贴)</h2><span class="badge" id="codexSize">0 B</span><span class="spacer"></span></div>
+    <div class="col-body" style="padding:10px">
+      <textarea id="codexInput" spellcheck="false" placeholder='粘贴 Codex 的请求 Body（OpenAI Responses API 的 JSON，含 instructions / input / tools）。'></textarea>
+    </div>
+    <div class="toolbar">
+      <button class="act" id="codexParseBtn">解析 ▸</button>
+      <button class="ghost" id="codexSampleBtn">示例</button>
+      <button class="ghost" id="codexFileBtn">载入文件</button>
+      <input type="file" id="codexFile" accept=".json,.txt" hidden>
+    </div>
+  </section>
+  <section class="col">
+    <div class="col-head"><h2>Context 拆解</h2><span class="badge" id="codexBadge">—</span><span class="spacer"></span><button class="copybtn" id="codexExportBtn" style="display:none">⬇ 摘要.md</button></div>
+    <div class="col-body" id="codexAnatomy">
+      <div class="empty">解析后，这里展示 Codex 请求的 <code>context</code> 由哪些部分组成：<br>
+      <code>instructions</code> / <code>tools</code> / <code>input</code> 的<b>体量占比</b>、各 item 类型、<br>
+      <code>reasoning</code> / <code>text.verbosity</code> / <code>prompt_cache_key</code> / AGENTS.md·environment_context 注入等控制项。</div>
+    </div>
+  </section>
+</div>
+
+<!-- ================= 功能四：Codex (Responses API) SSE 输出 ================= -->
+<div class="page" id="page-codexsse">
+  <section class="col">
+    <div class="col-head"><h2>SSE 原始文本 (粘贴)</h2><span class="badge" id="cxsseSize">0 B</span><span class="spacer"></span></div>
+    <div class="col-body" style="padding:10px">
+      <textarea id="cxsseInput" spellcheck="false" placeholder='粘贴 Codex / OpenAI Responses API 返回的原始 SSE 文本，形如：
+
+event: response.created
+data: {"type":"response.created",...}
+
+event: response.output_text.delta
+data: {...}
+...'></textarea>
+    </div>
+    <div class="toolbar">
+      <button class="act" id="cxsseParseBtn">解析 ▸</button>
+      <button class="ghost" id="cxsseSampleBtn">示例</button>
+      <button class="ghost" id="cxsseFileBtn">载入文件</button>
+      <input type="file" id="cxsseFile" accept=".txt,.sse,.log,.json" hidden>
+    </div>
+  </section>
+  <section class="col">
+    <div class="col-head"><h2>输出解析</h2><span class="badge" id="cxoutBadge">—</span><span class="spacer"></span><button class="copybtn" id="cxsseExportBtn" style="display:none">⬇ 分析.md</button></div>
+    <div class="tabs">
+      <button data-tab="cxrecon" class="active">重组结果</button>
+      <button data-tab="cxevents">事件流</button>
+      <button data-tab="cxraw">裸 SSE</button>
+    </div>
+    <div class="col-body" style="padding:0">
+      <div class="tabpane active" id="tab-cxrecon" style="padding:14px"><div class="empty">解析后展示：把 <code>*.delta</code> 拼回完整 output item（文本 / reasoning summary / 工具入参），<br>以及 <code>usage</code>（含 cached_tokens / reasoning_tokens）与 <code>status</code>。</div></div>
+      <div class="tabpane" id="tab-cxevents" style="padding:14px"></div>
+      <div class="tabpane" id="tab-cxraw" style="padding:14px"><pre class="raw" id="cxrawOut"></pre></div>
     </div>
   </section>
 </div>
@@ -451,12 +536,25 @@ function openFull(text, title, meta){
   document.addEventListener("keydown",e=>{ if(e.key==="Escape") close(); });
 })();
 
-//==================== 主功能 Tab 切换 ====================
-document.querySelectorAll(".maintabs button").forEach(b => b.onclick = () => {
-  document.querySelectorAll(".maintabs button").forEach(x => x.classList.remove("active"));
+//==================== 模式（claude / codex）与主功能 Tab 切换 ====================
+function bindTabs(sel){
+  document.querySelectorAll(sel+" button").forEach(b => b.onclick = () => {
+    document.querySelectorAll(sel+" button").forEach(x => x.classList.remove("active"));
+    document.querySelectorAll(".page").forEach(x => x.classList.remove("active"));
+    b.classList.add("active");
+    $("#page-" + b.dataset.page).classList.add("active");
+  });
+}
+bindTabs("#tabsClaude"); bindTabs("#tabsCodex");
+document.querySelectorAll(".brand.modesw").forEach(br => br.onclick = () => {
+  if (br.classList.contains("active")) return;
+  document.querySelectorAll(".brand.modesw").forEach(x => x.classList.toggle("active", x === br));
+  const codex = br.dataset.mode === "codex";
+  $("#tabsClaude").style.display = codex ? "none" : "";
+  $("#tabsCodex").style.display = codex ? "" : "none";
   document.querySelectorAll(".page").forEach(x => x.classList.remove("active"));
-  b.classList.add("active");
-  $("#page-" + b.dataset.page).classList.add("active");
+  const act = document.querySelector((codex ? "#tabsCodex" : "#tabsClaude") + " button.active");
+  $("#page-" + act.dataset.page).classList.add("active");
 });
 
 // 字节统计 debounce + localStorage 持久化（刷新不丢，超大文本不存避免超配额）
@@ -640,9 +738,10 @@ function renderBlock(b){
 }
 
 //—— 单个 tool：描述 / 原始 schema / 参数树 三视图（描述不截断）——
+// 同时兼容 Claude 的 input_schema 和 Codex(Responses API) 的 parameters
 function renderTool(tl){
   const dl=(tl.description||"").length;
-  const schema=tl.input_schema||{};
+  const schema=tl.input_schema||tl.parameters||{};
   const props=schema.properties?Object.keys(schema.properties):[];
   const required=new Set(schema.required||[]);
   const d=el("details","item");
@@ -878,6 +977,367 @@ function renderFlat(messages, root){
   });
 }
 
+//==================================================================
+// 功能三：Codex (Responses API) 请求体解析
+//==================================================================
+const codexInput = $("#codexInput");
+bindSize(codexInput, "#codexSize", "ci_codex");
+bindHotkey(codexInput, doCodexParse);
+bindDrop("#page-codex", codexInput, doCodexParse);
+$("#codexParseBtn").onclick = doCodexParse;
+$("#codexFileBtn").onclick = () => $("#codexFile").click();
+$("#codexFile").onchange = e => { const f=e.target.files[0]; if(!f)return; const r=new FileReader(); r.onload=()=>{codexInput.value=r.result;codexInput.dispatchEvent(new Event("input"));doCodexParse();}; r.readAsText(f); };
+$("#codexSampleBtn").onclick = () => {
+  codexInput.value = JSON.stringify(CODEX_SAMPLE, null, 2);
+  codexInput.dispatchEvent(new Event("input")); doCodexParse();
+};
+
+function doCodexParse(){
+  const txt = codexInput.value.trim(); const box = $("#codexAnatomy");
+  if (!txt) { box.innerHTML = '<div class="empty">请先粘贴请求体。</div>'; return; }
+  let body;
+  try { body = JSON.parse(txt); }
+  catch (e) { box.innerHTML = '<div class="empty" style="color:var(--red)">JSON 解析失败：<br>'+esc(e.message)+'</div>'; return; }
+  window.__lastCodexBody = body;
+  $("#codexExportBtn").style.display = "";
+  renderCodexAnatomy(body, box);
+}
+
+// Codex 会把 AGENTS.md / 环境信息伪装成 role:user 注入，靠这些前缀识别
+const CODEX_INJECT_RE = /^\s*(<(user_instructions|environment_context|permissions|collaboration_mode|skills_instructions|plugins_instructions|turn_context|turn_aborted|user_action|app_context)\b|# AGENTS\.md)/i;
+function codexMsgText(it){
+  if (typeof it.content === "string") return it.content;
+  return (it.content||[]).map(c=>c.text||"").join("\n");
+}
+// 把一个 input item 分到 user / assistant / tool / inject 四类
+function codexItemKind(it){
+  const t = it.type || "message";
+  if (t === "message"){
+    if (it.role === "assistant") return "assistant";
+    if (it.role === "developer" || it.role === "system") return "inject";
+    const texts = (Array.isArray(it.content)?it.content:[]).map(c=>c.text||"").filter(Boolean);
+    if (texts.length && texts.every(x=>CODEX_INJECT_RE.test(x))) return "inject";
+    return "user";
+  }
+  if (/_output$/.test(t)) return "tool";       // function_call_output / custom_tool_call_output / …
+  return "assistant";                          // reasoning / function_call / web_search_call / …
+}
+function codexInputPreview(it){
+  if (typeof it.content === "string") return it.content.trim();
+  const texts = (it.content||[]).filter(c=>/text$/.test(c.type||"")).map(c=>c.text||"");
+  const real = texts.find(x=>!CODEX_INJECT_RE.test(x));
+  return (real||texts[texts.length-1]||"(无文本)").trim();
+}
+function codexInjectTag(it){
+  const t = codexMsgText(it).trim();
+  if (/^# AGENTS\.md/.test(t)) return "AGENTS.md";
+  const m = t.match(/^<([a-zA-Z_ -]+?)>/);
+  return m ? m[1].trim() : (it.role || it.type || "inject");
+}
+// 切 Turn：真实 user 输入开新轮，其余归当前轮
+function buildCodexTurns(items){
+  const turns=[]; let cur=null;
+  const newTurn=(i,msg)=>{cur={index:turns.length,startIdx:i,userMsg:msg,steps:[],toolCalls:0};turns.push(cur);};
+  items.forEach((it,i)=>{
+    const k=codexItemKind(it);
+    if(k==="user"){ newTurn(i,it); cur.steps.push({kind:"user",idx:i,msg:it}); }
+    else{
+      if(!cur) newTurn(i,null);
+      cur.steps.push({kind:k,idx:i,msg:it});
+      if(/_call$/.test(it.type||"")) cur.toolCalls++;
+    }
+  });
+  return turns;
+}
+// call_id → 工具名（把 *_output 配回发起调用）
+function buildCodexCallMap(items){
+  const map={};
+  items.forEach((it,i)=>{ if(/_call$/.test(it.type||"")&&it.call_id) map[it.call_id]={name:it.name||it.type,idx:i}; });
+  return map;
+}
+// 工具输出预览 + 成败判定（exec_command 输出是带 metadata.exit_code 的 JSON 字符串）
+function codexOutputInfo(it){
+  let raw = it.output;
+  if (raw == null) raw = "";
+  if (typeof raw !== "string"){ try{raw=JSON.stringify(raw);}catch{raw=String(raw);} }
+  let ok=null, peek=raw.replace(/\s+/g," ").slice(0,80);
+  try{
+    const o=JSON.parse(raw);
+    if(o&&o.metadata&&o.metadata.exit_code!=null) ok=o.metadata.exit_code===0;
+    if(o&&typeof o.output==="string") peek=o.output.replace(/\s+/g," ").slice(0,80);
+  }catch{}
+  return {ok, peek};
+}
+
+function renderCodexAnatomy(body, box){
+  box.innerHTML = "";
+  const items = Array.isArray(body.input) ? body.input : [];
+  const insLen = jlen(body.instructions||""), toolsLen = jlen(body.tools||[]), inLen = jlen(items);
+  const total = insLen + toolsLen + inLen || 1;
+  $("#codexBadge").textContent = "≈ " + approxTok(total).toLocaleString() + " tok";
+
+  // 顶层参数
+  const p = el("div","sec"); p.append(secTitle("顶层参数 · 控制项"));
+  const kv = el("dl","kv");
+  const addkv=(k,v)=>{ if(v===undefined)return; kv.append(el("dt","",k),el("dd","",esc(typeof v==="object"?JSON.stringify(v):v))); };
+  ["model","reasoning","text","tool_choice","parallel_tool_calls","stream","store","include","prompt_cache_key","max_output_tokens","previous_response_id","truncation"].forEach(k=>addkv(k,body[k]));
+  if(body.client_metadata) addkv("client_metadata","{…客户端标识}");
+  p.append(kv);
+  const chips = el("div","");
+  if(body.reasoning&&body.reasoning.effort) chips.append(chip("reasoning: "+body.reasoning.effort,"on"));
+  if(body.text&&body.text.verbosity) chips.append(chip("verbosity: "+body.text.verbosity));
+  if(body.prompt_cache_key) chips.append(chip("prompt_cache_key ✓","on"));
+  if(body.store===false) chips.append(chip("store: false (无状态模式)","warn"));
+  if((body.include||[]).includes("reasoning.encrypted_content")) chips.append(chip("reasoning 密文回传","warn"));
+  if(chips.children.length) p.append(chips);
+  box.append(p);
+
+  // 体量占比（instructions ≈ system / input ≈ messages）
+  const v = el("div","sec"); v.append(secTitle("体量分布 · 谁在吃 context"));
+  const bar = el("div","bar");
+  const seg=(cls,w,label)=>{const d=el("div",cls);d.style.width=(w*100/total)+"%";if(w/total>.08)d.textContent=label;d.title=label+" "+fmtBytes(w);return d;};
+  if(insLen) bar.append(seg("seg-sys",insLen,"instructions"));
+  if(toolsLen) bar.append(seg("seg-tools",toolsLen,"tools"));
+  if(inLen) bar.append(seg("seg-msg",inLen,"input"));
+  v.append(bar);
+  v.append(el("div","legend",`<span><i style="background:var(--green)"></i>instructions ${fmtBytes(insLen)}</span><span><i style="background:var(--accent2)"></i>tools ${fmtBytes(toolsLen)}</span><span><i style="background:var(--accent)"></i>input ${fmtBytes(inLen)}</span>`));
+  const btypes={};
+  items.forEach(it=>{ const key=(it.type||"message")==="message"?"msg:"+(it.role||"?"):it.type; btypes[key]=(btypes[key]||0)+jlen(it); });
+  if(Object.keys(btypes).length){
+    const sub=el("div","",'<div style="font-size:11.5px;color:var(--muted);margin:10px 0 4px;font-family:var(--mono)">input 内部 item 类型占比：</div>');
+    const tot2=Object.values(btypes).reduce((a,b)=>a+b,0)||1;
+    const bar2=el("div","bar"); bar2.style.height="24px";
+    const colors={"msg:user":"var(--accent)","msg:assistant":"var(--accent2)","msg:developer":"var(--yellow)","msg:system":"var(--yellow)",reasoning:"var(--purple)",function_call:"var(--accent2)",function_call_output:"var(--green)",custom_tool_call:"var(--accent2)",custom_tool_call_output:"var(--green)"};
+    Object.entries(btypes).sort((a,b)=>b[1]-a[1]).forEach(([t,n])=>{const d=el("div");d.style.cssText=`width:${n*100/tot2}%;background:${colors[t]||'var(--muted)'};color:#0d1117`;if(n/tot2>.12)d.textContent=t;d.title=`${t} ${fmtBytes(n)} (${(n*100/tot2).toFixed(0)}%)`;bar2.append(d);});
+    sub.append(bar2); v.append(sub);
+  }
+  box.append(v);
+
+  // instructions：Codex 的 "system prompt" 是一整段 string
+  if(body.instructions){
+    const s=el("div","sec");
+    s.append(secTitle(`instructions · ${body.instructions.length.toLocaleString()} 字 · ≈${approxTok(body.instructions)}t`));
+    s.append(codeBlock(body.instructions,{label:"instructions 全文",title:"instructions"}));
+    box.append(s);
+  }
+  // tools：function / custom / namespace(MCP) / web_search 等
+  if(Array.isArray(body.tools)&&body.tools.length){
+    const flat=body.tools.reduce((a,t)=>a+(t.type==="namespace"?(t.tools||[]).length:1),0);
+    const tsec=el("div","sec");
+    tsec.append(secTitle(`tools · ${body.tools.length} 个条目${flat!==body.tools.length?`（展开 MCP namespace 后共 ${flat} 个）`:""}`));
+    body.tools.slice().sort((a,b)=>jlen(b)-jlen(a)).forEach(tl=>tsec.append(renderCodexTool(tl)));
+    box.append(tsec);
+  }
+  // input → Turn 分组
+  if(items.length) box.append(renderCodexInput(items));
+}
+
+function renderCodexTool(tl){
+  if(tl.type==="function") return renderTool(tl);   // 复用三视图（renderTool 已兼容 parameters）
+  const d=el("details","item");
+  if(tl.type==="namespace"){
+    const inner=tl.tools||[];
+    d.append(el("summary","",`<span class="btype tool_result">namespace</span><span class="btype tool_use">${esc(tl.name)}</span><span class="num-tag">${inner.length} 个 MCP 工具 · ≈${approxTok(jlen(tl))}t</span>`));
+    const ib=el("div","ibody");
+    if(tl.description) ib.append(codeBlock(tl.description,{label:`${tl.name} · description`,title:tl.name}));
+    inner.forEach(t2=>ib.append(renderTool(t2)));
+    d.append(ib);
+    return d;
+  }
+  if(tl.type==="custom"){
+    d.append(el("summary","",`<span class="btype thinking">custom</span><span class="btype tool_use">${esc(tl.name)}</span><span class="num-tag">${(tl.description||"").length} 字描述 · ≈${approxTok(jlen(tl))}t</span>`));
+    const ib=el("div","ibody");
+    ib.append(codeBlock(tl.description||"(无描述)",{label:`${tl.name} · description`,title:`${tl.name} 描述`}));
+    if(tl.format) ib.append(codeBlock(JSON.stringify(tl.format,null,2),{label:`${tl.name} · format (语法约束)`,title:`${tl.name} format`}));
+    d.append(ib);
+    return d;
+  }
+  // web_search / tool_search / local_shell 等内置工具
+  const name=tl.name||tl.type;
+  d.append(el("summary","",`<span class="btype thinking">${esc(tl.type)}</span><span class="num-tag">内置工具 · ≈${approxTok(jlen(tl))}t</span>`));
+  const ib=el("div","ibody");
+  ib.append(codeBlock(JSON.stringify(tl,null,2),{label:`${name} (raw)`,title:name}));
+  d.append(ib);
+  return d;
+}
+
+function renderCodexInput(items){
+  const msec=el("div","sec");
+  const head=secTitle("input · "+items.length+" 个 item");
+  const vt=el("div","viewtoggle");
+  const bGroup=el("button",null,"按 Turn 分组"); const bFlat=el("button",null,"平铺");
+  bGroup.classList.add("active"); vt.append(bGroup,bFlat); head.append(vt);
+  msec.append(head);
+
+  // item 类型统计
+  const cnt={}; items.forEach(it=>{const k=(it.type||"message")==="message"?(it.role||"?"):it.type;cnt[k]=(cnt[k]||0)+1;});
+  const rc=el("div",""); Object.entries(cnt).forEach(([r,n])=>rc.append(chip(r+" ×"+n,(r==="user"||r==="assistant")?"":"warn"))); msec.append(rc);
+  const injCnt=items.filter(it=>codexItemKind(it)==="inject").length;
+  if(injCnt) msec.append(el("div","",`<div class="hint" style="color:var(--yellow);margin:6px 0">⚠ 含 ${injCnt} 条注入（developer 消息 / AGENTS.md / environment_context 等伪装成 user 的内容），已在分组中标记为「注入」。</div>`));
+
+  const turns=buildCodexTurns(items);
+  const totalSteps=turns.reduce((a,t)=>a+t.steps.filter(s=>s.kind!=="inject").length,0);
+  const totalTools=turns.reduce((a,t)=>a+t.toolCalls,0);
+  msec.append(el("div","",`<div class="hint" style="margin:6px 0 2px">识别出 <b style="color:var(--accent)">${turns.length}</b> 个对话轮 (Turn) · 共 <b style="color:var(--accent2)">${totalSteps}</b> 个 step · <b style="color:var(--green)">${totalTools}</b> 次工具调用。一个 Turn = 一次真实用户输入到模型最终回复之间的完整 agent loop。</div>`));
+
+  const groupWrap=el("div",""); const flatWrap=el("div",""); flatWrap.style.display="none";
+  renderCodexTurns(turns, items, groupWrap);
+  msec.append(groupWrap, flatWrap);
+
+  // 关键字筛选（同 Claude 页逻辑）
+  const sbox=el("input","searchbox"); sbox.type="search"; sbox.placeholder="⌕ 筛选 item（按内容关键字）…";
+  msec.insertBefore(sbox, groupWrap);
+  const turnText=turns.map(t=>{try{return JSON.stringify(t.steps.map(s=>s.msg)).toLowerCase();}catch{return "";}});
+  const itemText=items.map(m=>{try{return JSON.stringify(m).toLowerCase();}catch{return "";}});
+  let st=null;
+  sbox.addEventListener("input",()=>{clearTimeout(st);st=setTimeout(()=>{
+    const q=sbox.value.trim().toLowerCase();
+    groupWrap.querySelectorAll(":scope > details.turn").forEach((d,i)=>{d.style.display=(!q||turnText[i].includes(q))?"":"none";});
+    flatWrap.querySelectorAll(":scope > details.item").forEach((d,i)=>{d.style.display=(!q||itemText[i].includes(q))?"":"none";});
+  },200);});
+
+  bGroup.onclick=()=>{bGroup.classList.add("active");bFlat.classList.remove("active");groupWrap.style.display="";flatWrap.style.display="none";};
+  bFlat.onclick=()=>{
+    bFlat.classList.add("active");bGroup.classList.remove("active");
+    if(!flatWrap.childElementCount) renderCodexFlat(items, flatWrap);
+    flatWrap.style.display="";groupWrap.style.display="none";
+  };
+  return msec;
+}
+
+function renderCodexTurns(turns, items, root){
+  const callMap=buildCodexCallMap(items);
+  turns.forEach((t,ti)=>{
+    const d=el("details","turn"); if(turns.length<=3) d.open=true;
+    const aSteps=t.steps.filter(s=>s.kind==="assistant").length;
+    const injSteps=t.steps.filter(s=>s.kind==="inject").length;
+    const tok=t.steps.reduce((a,st)=>a+approxTok(jlen(st.msg)),0);
+    const q=t.userMsg?codexInputPreview(t.userMsg):"（无显式用户输入 · 续接的工具回合）";
+    const sum=el("summary");
+    sum.innerHTML=`<span class="tn">Turn ${ti+1}</span><span class="tq">${esc(q.slice(0,90))}</span><span class="tmeta">${aSteps}×🤖 · ${t.toolCalls}×🔧 · ${injSteps}×💉 · ≈${tok}t</span>`;
+    d.append(sum);
+    const tb=el("div","turn-body");
+    const lane=el("div","lane");
+    t.steps.forEach((st,k)=>{ if(k) lane.append(el("span","arr","›"));
+      const label=st.kind==="user"?"user":st.kind==="assistant"?"asst":st.kind==="tool"?"tool":"inj";
+      lane.append(el("span","seg "+(st.kind==="inject"?"inject":st.kind),label)); });
+    tb.append(lane);
+    t.steps.forEach(st=>tb.append(renderCodexStep(st, callMap)));
+    d.append(tb); root.append(d);
+  });
+}
+
+function renderCodexStep(st, callMap){
+  const it=st.msg; const wrap=el("div","step s-"+st.kind);
+  wrap.append(el("div","rail"));
+  const card=el("div","scard"); const sh=el("div","sh");
+  const tok=approxTok(jlen(it));
+  const t=it.type||"message";
+  let ic="",label="",peek="",pairHtml="";
+  if(st.kind==="user"){ ic="👤"; label="用户输入"; peek=codexInputPreview(it).slice(0,80); }
+  else if(st.kind==="inject"){ ic="💉"; label="注入 · "+codexInjectTag(it); peek=codexMsgText(it).replace(/\s+/g," ").slice(0,80); }
+  else if(st.kind==="tool"){
+    ic="🔧"; label="工具结果";
+    const c=callMap[it.call_id];
+    const info=codexOutputInfo(it);
+    pairHtml=`<span class="toolpair ${info.ok===false?'err':'ok'}">↩ ${esc(c?c.name:(it.call_id||"?"))}${info.ok===false?' error':''}</span>`;
+    peek=info.peek;
+  }
+  else{ // assistant 侧：reasoning / *_call / 文本回复
+    ic="🤖";
+    if(t==="reasoning"){
+      label="助手 · 思考";
+      const sumTxt=(it.summary||[]).map(s=>s.text||"").join(" ");
+      peek="💭 "+(sumTxt?sumTxt.slice(0,70):(it.encrypted_content?"(仅 encrypted_content 密文)":"(空 summary)"));
+    }else if(/_call$/.test(t)){
+      label="助手 · 工具调用";
+      peek="调用 "+(it.name||t)+" "+String(it.arguments||it.input||"").replace(/\s+/g," ").slice(0,60);
+    }else{
+      label="助手 · 回复";
+      peek="💬 "+(codexMsgText(it)||"(最终回复)").slice(0,70);
+    }
+  }
+  sh.innerHTML=`<span class="ic">${ic}</span><span class="slabel">${label}</span>${pairHtml}<span class="speek">${esc(peek)}</span><span class="stok">[${st.idx}] ≈${tok}t</span>`;
+  card.append(sh);
+  const sb=el("div","sbody"); card.append(sb);
+  sh.onclick=()=>{
+    wrap.classList.toggle("open");
+    if(!wrap.classList.contains("open")||sb.childElementCount) return;
+    renderCodexItemBody(it, st.idx, sb);
+  };
+  wrap.append(card);
+  return wrap;
+}
+
+// item 详情体（懒渲染）
+function renderCodexItemBody(it, idx, sb){
+  const t=it.type||"message";
+  if(t==="message"){
+    if(typeof it.content==="string") sb.append(codeBlock(it.content,{label:`input [${idx}] 文本`,title:`input [${idx}]`}));
+    else (it.content||[]).forEach((c,j)=>{
+      sb.append(el("div","",`<div style="font-size:10.5px;color:var(--muted);font-family:var(--mono);margin:8px 0 2px"><span class="btype ${safeCls(c.type)}">${esc(c.type||"block")}</span></div>`));
+      sb.append(codeBlock(c.text!=null?c.text:JSON.stringify(c,null,2),{label:`input [${idx}] · ${c.type||"block"} #${j}`,title:`input [${idx}] · ${c.type||"block"}`}));
+    });
+  }else if(/_call$/.test(t)){
+    let args=it.arguments||it.input||""; try{args=JSON.stringify(JSON.parse(args),null,2);}catch{}
+    sb.append(codeBlock((it.name||t)+"("+args+")",{label:`${t}${it.name?" · "+it.name:""}`,title:`${it.name||t} 入参`}));
+  }else if(/_output$/.test(t)){
+    let raw=typeof it.output==="string"?it.output:JSON.stringify(it.output,null,2);
+    try{raw=JSON.stringify(JSON.parse(raw),null,2);}catch{}
+    sb.append(codeBlock(raw,{label:t,title:`工具输出 [${idx}]`}));
+  }else if(t==="reasoning"){
+    const sumTxt=(it.summary||[]).map(s=>s.text||"").join("\n\n");
+    sb.append(codeBlock(sumTxt||`(summary 为空${it.encrypted_content?"，仅有 encrypted_content 密文 "+String(it.encrypted_content).length+" 字符":""})`,{label:"reasoning summary",title:`reasoning [${idx}]`}));
+  }else{
+    sb.append(codeBlock(JSON.stringify(it,null,2),{label:t,title:`input [${idx}]`}));
+  }
+}
+
+// 平铺视图
+function renderCodexFlat(items, root){
+  items.forEach((it,i)=>{
+    const t=it.type||"message";
+    const d=el("details","item");
+    let tag=t==="message"?(it.role||"?"):t;
+    if(t==="message"&&it.role==="user"&&codexItemKind(it)==="inject") tag="user·注入";
+    const roleCls=t==="message"?"role-"+safeCls(it.role):"role-system";
+    const peekTxt=t==="message"?codexMsgText(it).replace(/\s+/g," ").slice(0,60):(it.name||"");
+    d.append(el("summary","",`<span class="role-tag ${roleCls}">${esc(tag)}</span><span class="eidx">[${i}]</span><span class="epeek" style="flex:1;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(peekTxt)}</span><span class="num-tag">≈${approxTok(jlen(it))}t</span>`));
+    const body2=el("div","ibody"); d.append(body2);
+    d.addEventListener("toggle",()=>{ if(!d.open||body2.childElementCount) return; renderCodexItemBody(it,i,body2); });
+    root.append(d);
+  });
+}
+
+//—— 内置 Codex 示例（按真实 Codex CLI 请求精简）——
+const CODEX_SAMPLE = {
+  model:"gpt-5.5",
+  instructions:"You are Codex, a coding agent based on GPT-5. You and the user share one workspace, and your job is to collaborate with them until their goal is genuinely handled.",
+  reasoning:{effort:"high"}, text:{verbosity:"low"},
+  tool_choice:"auto", parallel_tool_calls:true, store:false, stream:true,
+  include:["reasoning.encrypted_content"],
+  prompt_cache_key:"0b1c2d3e-demo",
+  tools:[
+    {type:"function",name:"exec_command",description:"Execute shell commands on the user's machine.",strict:false,
+     parameters:{type:"object",properties:{cmd:{type:"string",description:"Shell command to execute"},yield_time_ms:{type:"number",description:"How long to wait for output"}},required:["cmd"]}},
+    {type:"custom",name:"apply_patch",description:"Edit files via diff patches.",format:{type:"grammar",syntax:"lark",definition:"start: begin_patch hunk+ end_patch"}},
+    {type:"namespace",name:"mcp__demo",description:"Demo MCP server",tools:[
+      {type:"function",name:"query",description:"Run a read-only query.",strict:false,parameters:{type:"object",properties:{sql:{type:"string"}},required:["sql"]}}]},
+    {type:"web_search",external_web_access:true,search_content_types:["text","image"]}
+  ],
+  input:[
+    {type:"message",role:"developer",content:[{type:"input_text",text:"<permissions instructions> Filesystem sandboxing defines which files can be read or written…"}]},
+    {type:"message",role:"user",content:[
+      {type:"input_text",text:"# AGENTS.md instructions for /Users/demo\n\n<INSTRUCTIONS>\n始终用中文回复。\n</INSTRUCTIONS>"},
+      {type:"input_text",text:"<environment_context>\n  <cwd>/Users/demo</cwd>\n  <shell>zsh</shell>\n</environment_context>"}]},
+    {type:"message",role:"user",content:[{type:"input_text",text:"看一下当前目录有什么文件"}]},
+    {type:"reasoning",summary:[],encrypted_content:"gAAAAB-demo-ciphertext"},
+    {type:"function_call",name:"exec_command",arguments:"{\"cmd\":\"ls -la\"}",call_id:"call_001"},
+    {type:"function_call_output",call_id:"call_001",output:"{\"output\":\"total 16\\n-rw-r--r-- README.md\\ndrwxr-xr-x src\",\"metadata\":{\"exit_code\":0,\"duration_seconds\":0.08}}"},
+    {type:"message",role:"assistant",content:[{type:"output_text",text:"当前目录下有 README.md 和 src/ 目录。"}]}
+  ]
+};
+
 const sseInput = $("#sseInput");
 bindSize(sseInput, "#sseSize", "ci_sse");
 bindHotkey(sseInput, parseSSE);
@@ -888,8 +1348,9 @@ $("#sseFile").onchange = e => { const f=e.target.files[0]; if(!f)return; const r
 $("#sseSampleBtn").onclick = () => { sseInput.value = SSE_SAMPLE; sseInput.dispatchEvent(new Event("input")); parseSSE(); };
 
 document.querySelectorAll(".tabs button").forEach(b => b.onclick = () => {
-  document.querySelectorAll(".tabs button").forEach(x => x.classList.remove("active"));
-  document.querySelectorAll(".tabpane").forEach(x => x.classList.remove("active"));
+  const grp = b.closest(".col");   // 子 tab 按所在栏隔离，claude/codex 两组互不影响
+  grp.querySelectorAll(".tabs button").forEach(x => x.classList.remove("active"));
+  grp.querySelectorAll(".tabpane").forEach(x => x.classList.remove("active"));
   b.classList.add("active"); $("#tab-" + b.dataset.tab).classList.add("active");
 });
 
@@ -1084,6 +1545,218 @@ event: message_stop
 data: {"type":"message_stop"         }`;
 
 //==================================================================
+// 功能四：Codex (Responses API) SSE 解析
+//==================================================================
+const cxsseInput = $("#cxsseInput");
+bindSize(cxsseInput, "#cxsseSize", "ci_cxsse");
+bindHotkey(cxsseInput, parseCxSSE);
+bindDrop("#page-codexsse", cxsseInput, parseCxSSE);
+$("#cxsseParseBtn").onclick = parseCxSSE;
+$("#cxsseFileBtn").onclick = () => $("#cxsseFile").click();
+$("#cxsseFile").onchange = e => { const f=e.target.files[0]; if(!f)return; const r=new FileReader(); r.onload=()=>{cxsseInput.value=r.result;cxsseInput.dispatchEvent(new Event("input"));parseCxSSE();}; r.readAsText(f); };
+$("#cxsseSampleBtn").onclick = () => { cxsseInput.value = CXSSE_SAMPLE; cxsseInput.dispatchEvent(new Event("input")); parseCxSSE(); };
+
+// Responses API 事件名 → 颜色类别
+function cxEvtCls(t){
+  if(/error|\.failed|incomplete/.test(t)) return "cxerr";
+  if(/\.created|in_progress/.test(t)) return "cxstart";
+  if(/\.added/.test(t)) return "cxadd";
+  if(/\.delta/.test(t)) return "cxdelta";
+  if(/\.done|\.completed/.test(t)) return "cxdone";
+  return "";
+}
+
+function parseCxSSE(){
+  const txt = cxsseInput.value;
+  $("#cxrawOut").innerHTML=""; $("#tab-cxevents").innerHTML=""; $("#tab-cxrecon").innerHTML="";
+  if(!txt.trim()){ $("#tab-cxrecon").innerHTML='<div class="empty">请先粘贴 SSE 文本。</div>'; $("#cxoutBadge").textContent="—"; return; }
+
+  $("#cxrawOut").innerHTML = esc(txt).replace(/^(event:)/gm,'<span class="ev">$1</span>').replace(/^(data:)/gm,'<span class="da">$1</span>');
+
+  // items 按 output_index 累积；response.completed 给最终 usage/status
+  const state = { items:[], usage:null, model:"", status:"", error:null, id:"" };
+  const blocks = txt.split(/\r?\n\r?\n/).map(b=>b.trim()).filter(Boolean);
+  let evCount=0, errCount=0;
+  const typeCnt={};
+  blocks.forEach(block=>{
+    const ev = parseEventBlock(block);
+    if(!ev) return;
+    evCount++;
+    typeCnt[ev.type]=(typeCnt[ev.type]||0)+1;
+    if(/error|\.failed/.test(ev.type)) errCount++;
+    renderCxEventRow(ev.type, evCount-1, ev.data, ev.dataStr);
+    updateCxRecon(ev.type, ev.data, state);
+  });
+  if(evCount) buildCxEventFilter(typeCnt);
+  window.__cxsseState = state;
+  renderCxRecon(state);
+  $("#cxoutBadge").textContent = `${evCount} 事件` + (errCount?` · ${errCount} 错误`:"");
+  $("#cxsseExportBtn").style.display = evCount ? "" : "none";
+}
+
+function buildCxEventFilter(cnt){
+  const bar = el("div","filterbar");
+  Object.entries(cnt).sort((a,b)=>b[1]-a[1]).forEach(([t,n])=>{
+    const c = el("button","chip fchip",`${esc(t)} ×${n}`);
+    c.onclick = () => {
+      c.classList.toggle("off");
+      const hide=c.classList.contains("off");
+      document.querySelectorAll(`#tab-cxevents .evt[data-et="${CSS.escape(t)}"]`).forEach(x=>x.style.display=hide?"none":"");
+    };
+    bar.append(c);
+  });
+  $("#tab-cxevents").prepend(bar);
+}
+
+function renderCxEventRow(evType, idx, data, dataStr){
+  const c = el("div","evt et-"+cxEvtCls(evType));
+  c.dataset.et = evType;
+  let peek="";
+  if(data){
+    if(/\.delta$/.test(evType)) peek = "Δ " + String(data.delta ?? "").slice(0,90);
+    else if(evType==="response.output_item.added"||evType==="response.output_item.done"){ const it=data.item||{}; peek = it.type + (it.name?":"+it.name:"") + (it.status?" · "+it.status:""); }
+    else if(evType==="response.created"||evType==="response.in_progress"){ peek = (data.response&&data.response.model)||""; }
+    else if(evType==="response.completed"||evType==="response.failed"||evType==="response.incomplete"){
+      const r=data.response||{}; peek = "status="+r.status + (r.usage?" · out_tok="+r.usage.output_tokens:"");
+    }
+    else if(evType==="error") peek = (data.message||data.error&&data.error.message||dataStr).slice(0,90);
+    else if(data.part) peek = data.part.type||"";
+  }
+  const eh = el("div","eh");
+  eh.innerHTML = `<span class="etype">${esc(evType)}</span><span class="eidx">#${idx}</span><span class="epeek">${esc(peek)}</span>`;
+  c.append(eh);
+  c.append(el("pre","",esc(JSON.stringify(data ?? dataStr, null, 2))));
+  eh.onclick = () => c.classList.toggle("open");
+  $("#tab-cxevents").append(c);
+}
+
+function updateCxRecon(evType, data, state){
+  if(!data) return;
+  const idx = data.output_index;
+  const item = i => state.items[i] || (state.items[i]={type:"?",_text:"",_args:"",_sum:""});
+  if(evType==="response.created"||evType==="response.in_progress"){
+    const r=data.response||{}; state.model=r.model||state.model; state.id=r.id||state.id;
+  }
+  else if(evType==="response.output_item.added"&&data.item){ state.items[idx]={...data.item,_text:"",_args:"",_sum:""}; }
+  else if(evType==="response.output_text.delta"){ item(idx)._text += data.delta||""; }
+  else if(evType==="response.function_call_arguments.delta"||evType==="response.custom_tool_call_input.delta"){ item(idx)._args += data.delta||""; }
+  else if(evType==="response.reasoning_summary_text.delta"){ item(idx)._sum += data.delta||""; }
+  else if(evType==="response.output_item.done"&&data.item){
+    const acc=state.items[idx]||{};
+    state.items[idx]={...data.item,_text:acc._text||"",_args:acc._args||"",_sum:acc._sum||""};
+  }
+  else if(evType==="response.completed"||evType==="response.failed"||evType==="response.incomplete"){
+    const r=data.response||{};
+    state.status=r.status||""; state.usage=r.usage||state.usage; state.model=r.model||state.model;
+    if(r.error) state.error=r.error;
+    // 非流式 / completed 里带完整 output 时，直接采信最终结果
+    if(Array.isArray(r.output)&&r.output.length) state.items=r.output.map((it,i)=>({...it,...(state.items[i]||{})}));
+  }
+  else if(evType==="error"){ state.error=data; }
+}
+
+// OpenAI 官方价格表（$/MTok：输入 / cache 读 / 输出），standard 梯队。
+// cache 读折扣各系列不同（gpt-5 系 0.1×、gpt-4.1/o3 0.25×、gpt-4o 0.5×），所以逐模型存。
+// 按前缀匹配，更具体的名字放前面。
+const CX_PRICES = [
+  ["gpt-5.5-pro",30,null,180],["gpt-5.5",5,0.5,30],
+  ["gpt-5.4-mini",0.75,0.075,4.5],["gpt-5.4-nano",0.2,0.02,1.25],["gpt-5.4-pro",30,null,180],["gpt-5.4",2.5,0.25,15],
+  ["gpt-5.3-codex",1.75,0.175,14],["gpt-5.2-codex",1.75,0.175,14],["gpt-5.2-pro",21,null,168],["gpt-5.2",1.75,0.175,14],
+  ["gpt-5.1-codex-max",1.25,0.125,10],["gpt-5.1-codex-mini",0.25,0.025,2],["gpt-5.1-codex",1.25,0.125,10],["gpt-5.1",1.25,0.125,10],
+  ["gpt-5-codex",1.25,0.125,10],["gpt-5-mini",0.25,0.025,2],["gpt-5-nano",0.05,0.005,0.4],["gpt-5-pro",15,null,120],["gpt-5",1.25,0.125,10],
+  ["codex-mini-latest",1.5,0.375,6],
+  ["gpt-4.1-mini",0.4,0.1,1.6],["gpt-4.1-nano",0.1,0.025,0.4],["gpt-4.1",2,0.5,8],
+  ["gpt-4o-mini",0.15,0.075,0.6],["gpt-4o",2.5,1.25,10],
+  ["o3-pro",20,null,80],["o3-mini",1.1,0.55,4.4],["o3",2,0.5,8],["o4-mini",1.1,0.275,4.4],["o1",15,7.5,60],
+];
+// OpenAI 的 input_tokens 含 cached 部分：未命中按输入价、命中按 cache 读价
+function estimateCxCost(model, u){
+  if(!u) return null;
+  const hit = CX_PRICES.find(([m])=>String(model||"").includes(m));
+  if(!hit) return null;
+  const [,pin,pc,pout] = hit;
+  const cached = (u.input_tokens_details&&u.input_tokens_details.cached_tokens)||0;
+  const fresh = Math.max(0,(u.input_tokens||0)-cached);
+  return (fresh*pin + cached*(pc!=null?pc:pin) + (u.output_tokens||0)*pout) / 1e6;
+}
+
+function renderCxRecon(state){
+  const root = $("#tab-cxrecon"); root.innerHTML="";
+  const u = state.usage;
+  const items = state.items.filter(Boolean);
+  if(!u && !items.length){ root.innerHTML='<div class="empty">未能识别出标准事件。请确认粘贴的是 Responses API 的 SSE 文本。</div>'; return; }
+  if(u){
+    const ug = el("div","usage");
+    const card=(l,v)=>{const c=el("div","ucard");c.innerHTML=`<div class="ul">${l}</div><div class="uv">${v ?? "—"}</div>`;return c;};
+    ug.append(card("input tokens", u.input_tokens));
+    ug.append(card("output tokens", u.output_tokens));
+    const cached = u.input_tokens_details && u.input_tokens_details.cached_tokens;
+    if(cached!=null) ug.append(card("cache 读取", cached));
+    const rtok = u.output_tokens_details && u.output_tokens_details.reasoning_tokens;
+    if(rtok!=null) ug.append(card("reasoning tok", rtok));
+    if(cached!=null && u.input_tokens) ug.append(card("cache 命中", (cached*100/u.input_tokens).toFixed(1)+"%"));
+    if(u.total_tokens!=null) ug.append(card("total", u.total_tokens));
+    const cxcost = estimateCxCost(state.model, u);
+    if(cxcost!=null) ug.append(card("≈ 成本", "$"+(cxcost<0.01?cxcost.toFixed(5):cxcost.toFixed(4))));
+    root.append(ug);
+  }
+  const meta = el("div","");
+  meta.innerHTML = `<div class="hint" style="margin-bottom:6px">model: <b style="color:var(--accent2)">${esc(state.model||"—")}</b> &nbsp; status: <b style="color:var(--yellow)">${esc(state.status||"—")}</b>${state.id?` &nbsp; id: <b>${esc(state.id)}</b>`:""}</div>`;
+  root.append(meta);
+  if(state.error) root.append(el("div","",`<div class="hint" style="margin-bottom:8px;color:var(--red)">error: ${esc(JSON.stringify(state.error))}</div>`));
+
+  const rc = el("div","recon");
+  items.forEach((it,i)=>{
+    const blk=el("div","blk"); const bh=el("div","bh");
+    const t=it.type||"?";
+    bh.innerHTML=`<span class="btype ${safeCls(t)==="reasoning"?"thinking":safeCls(t)}">${esc(t)}</span><span class="eidx">item ${i}</span>${it.name?`<span style="color:var(--accent2)">${esc(it.name)}</span>`:""}${it.status?`<span class="eidx">${esc(it.status)}</span>`:""}`;
+    blk.append(bh);
+    if(t==="message"){
+      const txt = it._text || (Array.isArray(it.content)?it.content.map(c=>c.text||"").join("\n"):"");
+      blk.append(el("div","bc",esc(txt||"(空)")));
+    }else if(t==="reasoning"){
+      const sum = it._sum || (it.summary||[]).map(s=>s.text||"").join("\n\n");
+      blk.append(el("div","bc think",esc(sum||"(summary 为空"+(it.encrypted_content?"，仅有 encrypted_content 密文":"")+")")));
+    }else if(/_call$/.test(t)){
+      let args = it._args || it.arguments || it.input || "";
+      try{args=JSON.stringify(JSON.parse(args),null,2);}catch{}
+      blk.append(el("div","bc tool",esc((it.name||t)+" 入参:\n"+args)));
+    }else blk.append(el("div","bc",esc(JSON.stringify(it,null,1))));
+    rc.append(blk);
+  });
+  if(!items.length) rc.append(el("div","empty","无 output item（可能只有错误 / 未完成）"));
+  root.append(rc);
+}
+
+//—— 内置 Codex SSE 示例 ——
+const CXSSE_SAMPLE = `event: response.created
+data: {"type":"response.created","sequence_number":0,"response":{"id":"resp_demo123","object":"response","status":"in_progress","model":"gpt-5.5","output":[]}}
+
+event: response.output_item.added
+data: {"type":"response.output_item.added","sequence_number":1,"output_index":0,"item":{"id":"rs_demo","type":"reasoning","summary":[]}}
+
+event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","sequence_number":2,"item_id":"rs_demo","output_index":0,"summary_index":0,"delta":"用户想看目录内容，先执行 ls。"}
+
+event: response.output_item.done
+data: {"type":"response.output_item.done","sequence_number":3,"output_index":0,"item":{"id":"rs_demo","type":"reasoning","summary":[{"type":"summary_text","text":"用户想看目录内容，先执行 ls。"}],"encrypted_content":"gAAAAB-demo"}}
+
+event: response.output_item.added
+data: {"type":"response.output_item.added","sequence_number":4,"output_index":1,"item":{"id":"fc_demo","type":"function_call","name":"exec_command","arguments":"","call_id":"call_001"}}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","sequence_number":5,"item_id":"fc_demo","output_index":1,"delta":"{\\"cmd\\":\\"ls -la\\"}"}
+
+event: response.function_call_arguments.done
+data: {"type":"response.function_call_arguments.done","sequence_number":6,"item_id":"fc_demo","output_index":1,"arguments":"{\\"cmd\\":\\"ls -la\\"}"}
+
+event: response.output_item.done
+data: {"type":"response.output_item.done","sequence_number":7,"output_index":1,"item":{"id":"fc_demo","type":"function_call","status":"completed","name":"exec_command","arguments":"{\\"cmd\\":\\"ls -la\\"}","call_id":"call_001"}}
+
+event: response.completed
+data: {"type":"response.completed","sequence_number":8,"response":{"id":"resp_demo123","object":"response","status":"completed","model":"gpt-5.5","output":[{"id":"rs_demo","type":"reasoning","summary":[{"type":"summary_text","text":"用户想看目录内容，先执行 ls。"}]},{"id":"fc_demo","type":"function_call","status":"completed","name":"exec_command","arguments":"{\\"cmd\\":\\"ls -la\\"}","call_id":"call_001"}],"usage":{"input_tokens":24320,"input_tokens_details":{"cached_tokens":23552},"output_tokens":186,"output_tokens_details":{"reasoning_tokens":128},"total_tokens":24506}}}`;
+
+//==================================================================
 // 导出 Markdown
 //==================================================================
 function download(name, text){
@@ -1161,8 +1834,77 @@ function sseToMarkdown(st){
   return L.join("\n");
 }
 
+// Codex 请求拆解摘要 → md
+function codexToMarkdown(body){
+  const L=[];
+  L.push("# Codex 请求体拆解摘要","");
+  L.push("## 顶层参数");
+  ["model","reasoning","text","tool_choice","parallel_tool_calls","stream","store","include","prompt_cache_key"].forEach(k=>{
+    if(body[k]!==undefined) L.push(`- **${k}**: \`${typeof body[k]==="object"?JSON.stringify(body[k]):body[k]}\``);
+  });
+  const insLen=jlen(body.instructions||""),toolsLen=jlen(body.tools||[]),inLen=jlen(body.input||[]);
+  const total=insLen+toolsLen+inLen||1;
+  L.push("","## 体量分布","| 部分 | 大小 | 占比 |","|---|---|---|");
+  L.push(`| instructions | ${fmtBytes(insLen)} | ${(insLen*100/total).toFixed(1)}% |`);
+  L.push(`| tools | ${fmtBytes(toolsLen)} | ${(toolsLen*100/total).toFixed(1)}% |`);
+  L.push(`| input | ${fmtBytes(inLen)} | ${(inLen*100/total).toFixed(1)}% |`);
+  if(Array.isArray(body.tools)&&body.tools.length){
+    L.push("","## tools","",`| 工具 | 类型 | 描述字数 |`,`|---|---|---|`);
+    body.tools.forEach(t=>{
+      if(t.type==="namespace"){
+        L.push(`| ${t.name} | namespace (${(t.tools||[]).length} 个) | ${(t.description||"").length} |`);
+        (t.tools||[]).forEach(t2=>L.push(`| ↳ ${t2.name} | function | ${(t2.description||"").length} |`));
+      } else L.push(`| ${t.name||t.type} | ${t.type} | ${(t.description||"").length} |`);
+    });
+  }
+  if(Array.isArray(body.input)&&body.input.length){
+    const turns=buildCodexTurns(body.input);
+    const injCnt=body.input.filter(it=>codexItemKind(it)==="inject").length;
+    L.push("","## input / agent loop");
+    L.push(`- 共 ${body.input.length} 个 item，切分为 **${turns.length} 个 Turn**，含 ${injCnt} 条注入`);
+    turns.forEach((t,i)=>{
+      const q=t.userMsg?codexInputPreview(t.userMsg).replace(/\s+/g," ").slice(0,80):"(无显式输入)";
+      const lane=t.steps.map(s=>s.kind==="user"?"U":s.kind==="assistant"?"A":s.kind==="tool"?"T":"I").join("");
+      L.push(`- **Turn ${i+1}** [${lane}] ${t.toolCalls} 次工具调用 — ${q}`);
+    });
+  }
+  L.push("","---","*由 codex-inspector 生成 · 体量基于 JSON 字符数*");
+  return L.join("\n");
+}
+
+// Codex SSE 分析 → md
+function cxsseToMarkdown(st){
+  const u=st.usage||{}; const L=[];
+  L.push("# Codex (Responses API) SSE 流分析","");
+  L.push(`- **model**: \`${st.model||"—"}\``);
+  L.push(`- **status**: \`${st.status||"—"}\``);
+  if(st.error) L.push(`- **error**: \`${JSON.stringify(st.error)}\``);
+  L.push("","## usage","",`| 指标 | 值 |`,`|---|---|`);
+  [["input_tokens",u.input_tokens],["output_tokens",u.output_tokens],
+   ["cached_tokens",u.input_tokens_details&&u.input_tokens_details.cached_tokens],
+   ["reasoning_tokens",u.output_tokens_details&&u.output_tokens_details.reasoning_tokens],
+   ["total_tokens",u.total_tokens]]
+   .forEach(([k,v])=>{ if(v!=null) L.push(`| ${k} | ${v} |`); });
+  const cached=u.input_tokens_details&&u.input_tokens_details.cached_tokens;
+  if(cached!=null&&u.input_tokens) L.push(`| cache 命中率 | ${(cached*100/u.input_tokens).toFixed(1)}% |`);
+  const cxcost=estimateCxCost(st.model,u);
+  if(cxcost!=null) L.push(`| ≈ 成本 | $${cxcost.toFixed(5)} |`);
+  L.push("","## 重组 output items");
+  st.items.forEach((it,i)=>{
+    if(!it) return;
+    L.push("",`### item ${i} · ${it.type}${it.name?` · ${it.name}`:""}`);
+    if(it.type==="message") L.push("", it._text||(Array.isArray(it.content)?it.content.map(c=>c.text||"").join("\n"):"(空)"));
+    else if(it.type==="reasoning") L.push("", it._sum||(it.summary||[]).map(s=>s.text||"").join("\n")||"(summary 为空)");
+    else if(/_call$/.test(it.type||"")){ let a=it._args||it.arguments||""; try{a=JSON.stringify(JSON.parse(a),null,2);}catch{} L.push("","```json",a,"```"); }
+  });
+  L.push("","---","*由 codex-inspector 生成*");
+  return L.join("\n");
+}
+
 $("#reqExportBtn").onclick = () => { if(window.__lastBody) download("claude-request-summary.md", reqToMarkdown(window.__lastBody)); };
 $("#sseExportBtn").onclick = () => { if(window.__sseState) download("claude-sse-analysis.md", sseToMarkdown(window.__sseState)); };
+$("#codexExportBtn").onclick = () => { if(window.__lastCodexBody) download("codex-request-summary.md", codexToMarkdown(window.__lastCodexBody)); };
+$("#cxsseExportBtn").onclick = () => { if(window.__cxsseState) download("codex-sse-analysis.md", cxsseToMarkdown(window.__cxsseState)); };
 
 //==================================================================
 // 启动：恢复上次的输入（localStorage）
@@ -1173,6 +1915,10 @@ $("#sseExportBtn").onclick = () => { if(window.__sseState) download("claude-sse-
     if(r){ reqInput.value=r; reqInput.dispatchEvent(new Event("input")); doParse(); }
     const s = localStorage.getItem("ci_sse");
     if(s){ sseInput.value=s; sseInput.dispatchEvent(new Event("input")); parseSSE(); }
+    const c = localStorage.getItem("ci_codex");
+    if(c){ codexInput.value=c; codexInput.dispatchEvent(new Event("input")); doCodexParse(); }
+    const cs = localStorage.getItem("ci_cxsse");
+    if(cs){ cxsseInput.value=cs; cxsseInput.dispatchEvent(new Event("input")); parseCxSSE(); }
   }catch{}
 })();
 

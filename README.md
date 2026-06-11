@@ -2,7 +2,7 @@
 
 **Claude API 请求与 SSE 解剖台** —— 一个纯前端、零依赖的离线解析工具。
 
-在线使用：**https://inspector.pdjjq.org**
+在线使用：**https://inspector.evilstar.org**
 
 把 Claude API（`/v1/messages`）的请求 Body 或返回的原始 SSE 流粘贴进去，可视化地看清一次请求的 context 由什么组成、一次响应的流由什么构成。所有解析都在浏览器本地完成，**不上传任何数据**。
 
