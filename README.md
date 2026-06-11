@@ -30,6 +30,10 @@
 
 ![SSE 重组](docs/screenshot-sse-recon.png)
 
+**Codex 请求拆解** —— Responses API 的 instructions / tools / input 体量分布、reasoning·verbosity 控制项、四类工具与 input item 类型统计：
+
+![Codex 请求拆解](docs/screenshot-codex-anatomy.png)
+
 ## 功能
 
 ### Claude 模式
